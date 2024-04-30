@@ -1,67 +1,42 @@
-from pyVim import connect
-from csv import writer
+from pyVim.connect import SmartConnect, Disconnect
+from pyVmomi import vim
 
-def get_windows_host_details(service_instance):
-  """
-  Retrieves details of Windows hosts from the specified vCenter.
+def connect_to_vcenter(vcenter_ip, username, password):
+    try:
+        # Establish connection to vCenter
+        si = SmartConnect(host=vcenter_ip, user=username, pwd=password)
+        content = si.content
+        return content
+    except Exception as e:
+        print(f"Error connecting to {vcenter_ip}: {str(e)}")
+        return None
 
-  Args:
-      service_instance: A pyVimomi ServiceInstance object representing the vCenter.
-
-  Returns:
-      A list of dictionaries, where each dictionary contains information
-      about a Windows host (name, model, CPU count, memory size, OS version).
-  """
-  content = service_instance.RetrieveContent()
-  container_view = content.rootFolder
-  view = content.viewManager.CreateContainerView(container_view, [vim.Host], True)
-  hosts = view.view
-
-  windows_hosts = []
-  for host in hosts:
-    if host.summary.guestOperatingSystem == "windows":
-      summary = host.summary
-      host_info = {
-          "name": summary.config.name,
-          "model": summary.hardware.hardwareVersion,
-          "cpu_count": summary.hardware.cpuCount,
-          "memory_size": summary.hardware.memorySize / (1024 * 1024 * 1024),
-          "os_version": summary.guestOperatingSystem
-      }
-      windows_hosts.append(host_info)
-
-  view.Destroy()
-  return windows_hosts
+def get_windows_hosts(content):
+    try:
+        # Retrieve Windows hosts
+        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
+        hosts = container.view
+        windows_hosts = [host for host in hosts if "Windows" in host.summary.config.product.fullName]
+        return windows_hosts
+    except Exception as e:
+        print(f"Error fetching Windows hosts: {str(e)}")
+        return []
 
 def main():
-  """
-  Connects to multiple vCenters, fetches Windows host details, and exports to CSV.
-  """
-  vcenter_configs = [
-      {"host": "vcenter1.example.com", "user": "username", "password": "password"},
-      {"host": "vcenter2.example.com", "user": "username", "password": "password"},
-      # ... Add additional vCenter configurations here
-  ]
+    vcenter_ips = ["vcenter1.example.com", "vcenter2.example.com"]
+    username = "your_username"
+    password = "your_password"
 
-  all_windows_hosts = []
-  for config in vcenter_configs:
-    try:
-      service_instance = connect.SmartConnectNoSSL(**config)
-      windows_hosts = get_windows_host_details(service_instance)
-      all_windows_hosts.extend(windows_hosts)
-    except vim.fault.VimFaultException as e:
-      print(f"Error connecting to vCenter {config['host']}: {e}")
-    finally:
-      connect.Disconnect(service_instance)
+    for vcenter_ip in vcenter_ips:
+        content = connect_to_vcenter(vcenter_ip, username, password)
+        if content:
+            windows_hosts = get_windows_hosts(content)
+            print(f"Windows hosts in {vcenter_ip}:")
+            for host in windows_hosts:
+                print(f"- {host.name}")
 
-  # Export data to CSV
-  with open("windows_hosts.csv", "w", newline="") as csvfile:
-    csv_writer = writer(csvfile)
-    csv_writer.writerow(["Name", "Model", "CPU Count", "Memory Size (GB)", "OS Version"])
-    for host in all_windows_hosts:
-      csv_writer.writerow([host[key] for key in host])
-
-  print("Windows host details exported to windows_hosts.csv")
+        # Disconnect from vCenter
+        Disconnect(content)
 
 if __name__ == "__main__":
-  main()
+    main()
