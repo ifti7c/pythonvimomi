@@ -1,66 +1,67 @@
-import csv
-from pyVmomi import vmodl, vim
-from tools import cli, service_instance  # Import external modules
+from pyVim import connect
+from csv import writer
 
-def print_host_info_to_csv(host, csv_writer):
+def get_windows_host_details(service_instance):
   """
-  Extracts and writes information to the provided CSV writer.
-  """
-  summary = host.summary
-  csv_writer.writerow([summary.config.name, summary.hardware.memorySize, summary.overallStatus])
+  Retrieves details of Windows hosts from the specified vCenter.
 
-def get_vcenter_servers(file_path):
+  Args:
+      service_instance: A pyVimomi ServiceInstance object representing the vCenter.
+
+  Returns:
+      A list of dictionaries, where each dictionary contains information
+      about a Windows host (name, model, CPU count, memory size, OS version).
   """
-  Reads vCenter server URLs from a file and returns a list.
-  """
-  vcenters = []
-  try:
-    with open(file_path, 'r') as file:
-      for line in file:
-        vcenters.append(line.strip())  # Remove leading/trailing whitespaces
-  except FileNotFoundError:
-    print(f"Error: File not found - {file_path}")
-  except Exception as err:
-    print(f"Error reading vCenter list file: {err}")
-  return vcenters
+  content = service_instance.RetrieveContent()
+  container_view = content.rootFolder
+  view = content.viewManager.CreateContainerView(container_view, [vim.Host], True)
+  hosts = view.view
+
+  windows_hosts = []
+  for host in hosts:
+    if host.summary.guestOperatingSystem == "windows":
+      summary = host.summary
+      host_info = {
+          "name": summary.config.name,
+          "model": summary.hardware.hardwareVersion,
+          "cpu_count": summary.hardware.cpuCount,
+          "memory_size": summary.hardware.memorySize / (1024 * 1024 * 1024),
+          "os_version": summary.guestOperatingSystem
+      }
+      windows_hosts.append(host_info)
+
+  view.Destroy()
+  return windows_hosts
 
 def main():
   """
-  Simple command-line program for listing host information in a CSV file, handling multiple vCenters from a file.
+  Connects to multiple vCenters, fetches Windows host details, and exports to CSV.
   """
-  parser = cli.Parser()
-  parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
-  parser.add_argument('-f', '--vcenter_file', required=True, help='Path to the file containing vCenter server URLs (one per line)')
-  args = parser.get_args()
+  vcenter_configs = [
+      {"host": "vcenter1.example.com", "user": "username", "password": "password"},
+      {"host": "vcenter2.example.com", "user": "username", "password": "password"},
+      # ... Add additional vCenter configurations here
+  ]
 
-  # Read vCenter list from file
-  vcenter_urls = get_vcenter_servers(args.vcenter_file)
-
-  # Loop through each vCenter server URL
-  for vcenter_url in vcenter_urls:
+  all_windows_hosts = []
+  for config in vcenter_configs:
     try:
-      si = service_instance.connect(vcenter_url)  # Connect to vCenter
+      service_instance = connect.SmartConnectNoSSL(**config)
+      windows_hosts = get_windows_host_details(service_instance)
+      all_windows_hosts.extend(windows_hosts)
+    except vim.fault.VimFaultException as e:
+      print(f"Error connecting to vCenter {config['host']}: {e}")
+    finally:
+      connect.Disconnect(service_instance)
 
-      content = si.RetrieveContent()
-      container = content.rootFolder
-      view_type = [vim.HostSystem]  # Specify we want to view HostSystem objects
-      recursive = True  # Search recursively through the inventory
-      container_view = content.viewManager.CreateContainerView(container, view_type, recursive)
-      children = container_view.view  # Get the list of hosts
+  # Export data to CSV
+  with open("windows_hosts.csv", "w", newline="") as csvfile:
+    csv_writer = writer(csvfile)
+    csv_writer.writerow(["Name", "Model", "CPU Count", "Memory Size (GB)", "OS Version"])
+    for host in all_windows_hosts:
+      csv_writer.writerow([host[key] for key in host])
 
-      with open(args.output, 'a', newline='') as csvfile:  # Append mode for multiple vCenters
-        csv_writer = csv.writer(csvfile)
-        if vcenter_url == vcenter_urls[0]:  # Write header row only for the first vCenter
-          csv_writer.writerow(['Hostname', 'Memory (MB)', 'Overall Status'])
-        for child in children:
-          print_host_info_to_csv(child, csv_writer)
+  print("Windows host details exported to windows_hosts.csv")
 
-    except vmodl.MethodFault as error:
-      print(f"Caught vmodl fault for vCenter {vcenter_url}: {error.msg}")
-
-  # Indicate program completion
-  print("Finished processing vCenters.")
-
-# Start program
 if __name__ == "__main__":
   main()
