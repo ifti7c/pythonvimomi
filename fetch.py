@@ -12,21 +12,18 @@ def print_vm_info_to_csv(virtual_machine, csv_writer):
   if summary.config.guestFullName is not None and summary.config.guestFullName != "":
     # Check for "Red Hat" or "RHEL" in guestFullName, exclude "TMPL" in the name
     if ("Red Hat" in summary.config.guestFullName or "RHEL" in summary.config.guestFullName) and "TMPL" not in summary.config.name:
-      # Get all disks and their capacity
+      # Get all disks
       disks = virtual_machine.config.hardware.device
-      num_disks = len([device for device in disks if isinstance(device, vim.vm.device.VirtualDisk)])
 
-      # Create empty list to hold disk size (GB) values
-      disk_sizes_gb = [None] * num_disks
-
+      # Create a list to hold disk labels and sizes
+      disk_info = []
       for device in disks:
         if isinstance(device, vim.vm.device.VirtualDisk):
-          index = disks.index(device)
           disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
-          disk_sizes_gb[index] = disk_capacity_in_GB
+          disk_info.append(f"{device.deviceInfo.label} ({disk_capacity_in_GB} GB)")
 
       # Write VM information including all disks in separate columns
-      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_sizes_gb)
+      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_info)
 
 def main():
   """
@@ -50,16 +47,8 @@ def main():
     with open(args.output, 'w', newline='') as csvfile:
       csv_writer = csv.writer(csvfile)  # Create a CSV writer object
 
-      # Determine the maximum number of disks across all VMs
-      max_disks = 0
-      for child in children:
-        disks = child.config.hardware.device
-        max_disks = max(max_disks, len([device for device in disks if isinstance(device, vim.vm.device.VirtualDisk)]))
-
-      # Create header row with VM information and column names for each disk
+      # Header row with VM information and column names for each disk
       header_row = ['VM Name', 'Guest OS', 'IP Address']
-      for i in range(max_disks):
-        header_row.append(f'Disk {i+1} (GB)')
       csv_writer.writerow(header_row)
 
       for child in children:  # Iterate over each virtual machine
