@@ -19,7 +19,11 @@ def print_vm_info_to_csv(virtual_machine, csv_writer):
       disk_sizes_gb = []
       for device in disks:
         if isinstance(device, vim.vm.device.VirtualDisk):
-          disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
+          # Ensure we handle potential division by zero
+          if device.capacityInKB > 0:
+            disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
+          else:
+            disk_capacity_in_GB = 0.0  # Set size to 0 if capacity is 0
           disk_sizes_gb.append(disk_capacity_in_GB)
 
       # Write VM information including all disk sizes in separate columns
