@@ -4,7 +4,7 @@ from tools import cli, service_instance  # Import external modules
 
 def print_vm_info_to_csv(virtual_machine, csv_writer):
   """
-  Extracts and writes information to the provided CSV writer, including all VM disk sizes in separate columns.
+  Extracts and writes information to the provided CSV writer, including all VM disks with labels in headers.
   """
   summary = virtual_machine.summary
 
@@ -15,23 +15,22 @@ def print_vm_info_to_csv(virtual_machine, csv_writer):
       # Get all disks
       disks = virtual_machine.config.hardware.device
 
-      # Create a list to hold disk sizes
-      disk_sizes_gb = []
+      # Create a list to hold disk labels and sizes
+      disk_info = []
+ #     disk_labels = []
       for device in disks:
         if isinstance(device, vim.vm.device.VirtualDisk):
-          # Ensure we handle potential division by zero
-          if device.capacityInKB > 0:
-            disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
-          else:
-            disk_capacity_in_GB = 0.0  # Set size to 0 if capacity is 0
-          disk_sizes_gb.append(disk_capacity_in_GB)
+          disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
+          disk_info.append(f"{disk_capacity_in_GB} GB")
+          disk_labels.append(device.deviceInfo.label)
 
-      # Write VM information including all disk sizes in separate columns
-      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_sizes_gb)
+      # Write VM information including all disks with labels in headers
+      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_info)
+      csv_writer.writerow([None] * 3 + disk_info)  # Write disk sizes in a separate row
 
 def main():
   """
-  Simple command-line program for listing VM information with all disk sizes in separate columns of a CSV file.
+  Simple command-line program for listing VM information with all disks and their sizes in a separate row of a CSV file.
   """
 
   parser = cli.Parser()  # Create a command-line argument parser
@@ -51,10 +50,8 @@ def main():
     with open(args.output, 'w', newline='') as csvfile:
       csv_writer = csv.writer(csvfile)  # Create a CSV writer object
 
-      # Header row with VM information and column names for disk sizes
+      # Header row with VM information
       header_row = ['VM Name', 'Guest OS', 'IP Address']
-      for i in range(len(children[0].config.hardware.device) if children else 0):  # Dynamically determine number of disks from first VM
-        header_row.append(f'Disk {i+1} (GB)')
       csv_writer.writerow(header_row)
 
       for child in children:  # Iterate over each virtual machine
