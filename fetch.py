@@ -17,7 +17,7 @@ def print_vm_info_to_csv(virtual_machine, csv_writer):
 
       # Create a list to hold disk labels and sizes
       disk_info = []
- #     disk_labels = []
+      disk_labels = []
       for device in disks:
         if isinstance(device, vim.vm.device.VirtualDisk):
           disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
@@ -25,7 +25,7 @@ def print_vm_info_to_csv(virtual_machine, csv_writer):
           disk_labels.append(device.deviceInfo.label)
 
       # Write VM information including all disks with labels in headers
-      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_info)
+      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_labels)
       csv_writer.writerow([None] * 3 + disk_info)  # Write disk sizes in a separate row
 
 def main():
