@@ -1,60 +1,76 @@
-from pyVim.connect import SmartConnect, Disconnect
-from pyVmomi import vim
 import csv
+from pyVmomi import vmodl, vim
+from tools import cli, service_instance  # Import external modules
 
-def connect_to_vcenter(vcenter_ip, username, password):
-    try:
-        si = SmartConnect(host=vcenter_ip, user=username, pwd=password)
-        content = si.content
-        return content
-    except Exception as e:
-        print(f"Error connecting to {vcenter_ip}: {str(e)}")
-        return None
+def print_vm_info_to_csv(virtual_machine, csv_writer):
+  """
+  Extracts and writes information to the provided CSV writer, including all VM disks in separate columns.
+  """
+  summary = virtual_machine.summary
 
-def get_windows_hosts(content):
-    try:
-        # Retrieve Windows hosts
-        container = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)
-        hosts = container.view
-        windows_hosts = [host for host in hosts if "Windows" in host.summary.config.product.fullName]
-        return windows_hosts
-    except Exception as e:
-        print(f"Error fetching Windows hosts: {str(e)}")
-        return []
+  # Check if guestFullName exists and is not blank
+  if summary.config.guestFullName is not None and summary.config.guestFullName != "":
+    # Check for "Red Hat" or "RHEL" in guestFullName, exclude "TMPL" in the name
+    if ("Red Hat" in summary.config.guestFullName or "RHEL" in summary.config.guestFullName) and "TMPL" not in summary.config.name:
+      # Get all disks and their capacity
+      disks = virtual_machine.config.hardware.device
+      num_disks = len([device for device in disks if isinstance(device, vim.vm.device.VirtualDisk)])
 
-def write_to_csv(windows_hosts, output_file):
-    try:
-        with open(output_file, mode="w", newline="") as csvfile:
-            fieldnames = ["Host Name", "Environment", "FQDN", "OS", "vCPU Count", "RAM (GB)"]
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
+      # Create empty list to hold disk size (GB) values
+      disk_sizes_gb = [None] * num_disks
 
-            for host in windows_hosts:
-                writer.writerow({
-                    "Host Name": host.name,
-                    "Environment": host.summary.config.annotation,
-                    "FQDN": host.summary.config.name,
-                    "OS": host.summary.config.product.fullName,
-                    "vCPU Count": host.hardware.cpuInfo.numCpuCores,
-                    "RAM (GB)": round(host.hardware.memorySize / (1024 ** 3), 2)
-                })
-        print(f"Data exported to {output_file}")
-    except Exception as e:
-        print(f"Error writing to {output_file}: {str(e)}")
+      for device in disks:
+        if isinstance(device, vim.vm.device.VirtualDisk):
+          index = disks.index(device)
+          disk_capacity_in_GB = round(device.capacityInKB / (1024 * 1024 * 1024), 2)
+          disk_sizes_gb[index] = disk_capacity_in_GB
+
+      # Write VM information including all disks in separate columns
+      csv_writer.writerow([summary.config.name, summary.config.guestFullName, summary.guest.ipAddress] + disk_sizes_gb)
 
 def main():
-    vcenter_ip = "vcenter.example.com"
-    username = "your_username"
-    password = "your_password"
-    output_file = "windows_hosts.csv"  # Specify your desired output file name
+  """
+  Simple command-line program for listing VM information with all disks in separate columns of a CSV file.
+  """
 
-    content = connect_to_vcenter(vcenter_ip, username, password)
-    if content:
-        windows_hosts = get_windows_hosts(content)
-        write_to_csv(windows_hosts, output_file)
+  parser = cli.Parser()  # Create a command-line argument parser
+  parser.add_argument('-o', '--output', required=True, help='Path to the output CSV file')
+  args = parser.get_args()  # Parse the command-line arguments
+  si = service_instance.connect(args)  # Connect to the vCenter server
 
-        # Disconnect from vCenter
-        Disconnect(content)
+  try:
+    content = si.RetrieveContent()  # Get the root content object from vCenter
 
+    container = content.rootFolder  # Get the root folder
+    view_type = [vim.VirtualMachine]  # Specify we want to view VirtualMachine objects
+    recursive = True  # Search recursively through the inventory
+    container_view = content.viewManager.CreateContainerView(container, view_type, recursive)
+    children = container_view.view  # Get the list of virtual machines
+
+    with open(args.output, 'w', newline='') as csvfile:
+      csv_writer = csv.writer(csvfile)  # Create a CSV writer object
+
+      # Determine the maximum number of disks across all VMs
+      max_disks = 0
+      for child in children:
+        disks = child.config.hardware.device
+        max_disks = max(max_disks, len([device for device in disks if isinstance(device, vim.vm.device.VirtualDisk)]))
+
+      # Create header row with VM information and column names for each disk
+      header_row = ['VM Name', 'Guest OS', 'IP Address']
+      for i in range(max_disks):
+        header_row.append(f'Disk {i+1} (GB)')
+      csv_writer.writerow(header_row)
+
+      for child in children:  # Iterate over each virtual machine
+        print_vm_info_to_csv(child, csv_writer)  # Process VM information
+
+  except vmodl.MethodFault as error:
+    print("Caught vmodl fault : " + error.msg)  # Handle errors during API calls
+    return -1  # Indicate failure
+
+  return 0  # Indicate success
+
+# Start program
 if __name__ == "__main__":
-    main()
+  main()
